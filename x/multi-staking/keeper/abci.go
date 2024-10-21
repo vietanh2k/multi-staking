@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/realio-tech/multi-staking-module/x/multi-staking/types"
@@ -15,7 +16,8 @@ func (k Keeper) BeginBlocker(ctx sdk.Context) {
 }
 
 // need a way to better name this func
-func GetUnbondingHeightsAndUnbondedAmounts(ctx sdk.Context, unbondingDelegation stakingtypes.UnbondingDelegation) map[int64]math.Int {
+func GetUnbondingHeightsAndUnbondedAmounts(c context.Context, unbondingDelegation stakingtypes.UnbondingDelegation) map[int64]math.Int {
+	ctx := sdk.UnwrapSDKContext(c)
 	ctxTime := ctx.BlockHeader().Time
 
 	unbondingHeightsAndUnbondedAmounts := map[int64]math.Int{}
@@ -35,7 +37,7 @@ func GetUnbondingHeightsAndUnbondedAmounts(ctx sdk.Context, unbondingDelegation 
 	return unbondingHeightsAndUnbondedAmounts
 }
 
-func (k Keeper) EndBlocker(ctx sdk.Context, matureUnbondingDelegations []stakingtypes.UnbondingDelegation) {
+func (k Keeper) EndBlocker(ctx context.Context, matureUnbondingDelegations []stakingtypes.UnbondingDelegation) {
 	for _, unbond := range matureUnbondingDelegations {
 		multiStakerAddr, valAcc, err := types.AccAddrAndValAddrFromStrings(unbond.DelegatorAddress, unbond.ValidatorAddress)
 		if err != nil {
@@ -53,13 +55,14 @@ func (k Keeper) EndBlocker(ctx sdk.Context, matureUnbondingDelegations []staking
 }
 
 func (k Keeper) BurnUnbondedCoinAndUnlockedMultiStakingCoin(
-	ctx sdk.Context,
+	c context.Context,
 	multiStakerAddr sdk.AccAddress,
 	valAddr sdk.ValAddress,
 	unbondingHeight int64,
 	unbondAmount math.Int,
 ) (unlockedCoin sdk.Coin, err error) {
 	// get unlock record
+	ctx := sdk.UnwrapSDKContext(c)
 	unlockID := types.MultiStakingUnlockID(multiStakerAddr.String(), valAddr.String())
 	unlockEntry, found := k.GetUnlockEntryAtCreationHeight(ctx, unlockID, unbondingHeight)
 	if !found {
@@ -75,8 +78,12 @@ func (k Keeper) BurnUnbondedCoinAndUnlockedMultiStakingCoin(
 		return sdk.Coin{}, fmt.Errorf("unlock amount greater than lock amount")
 	}
 
+	bondDenom, err := k.stakingKeeper.BondDenom(ctx)
+	if err != nil {
+		panic(err)
+	}
 	// burn bonded coin
-	burnCoin := sdk.NewCoin(k.stakingKeeper.BondDenom(ctx), unbondAmount)
+	burnCoin := sdk.NewCoin(bondDenom, unbondAmount)
 	err = k.BurnCoin(ctx, multiStakerAddr, burnCoin)
 	if err != nil {
 		return sdk.Coin{}, err

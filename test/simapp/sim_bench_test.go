@@ -5,10 +5,10 @@ import (
 	"os"
 	"testing"
 
+	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
+	"github.com/cosmos/cosmos-sdk/baseapp"
 	simtypes "github.com/cosmos/cosmos-sdk/types/simulation"
 	"github.com/cosmos/cosmos-sdk/x/simulation"
-
-	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
 )
 
 // Profile with:
@@ -28,7 +28,7 @@ func BenchmarkFullAppSimulation(b *testing.B) {
 		}
 	}()
 
-	app := NewSimApp(logger, db, nil, true, map[int64]bool{}, DefaultNodeHome, FlagPeriodValue, MakeTestEncodingConfig(), EmptyAppOptions{}, interBlockCacheOpt())
+	app := NewSimApp(logger, db, nil, true, map[int64]bool{}, DefaultNodeHome, FlagPeriodValue, MakeTestEncodingConfig(), EmptyAppOptions{}, interBlockCacheOpt(), baseapp.SetChainID(config.ChainID))
 
 	// run randomized simulation
 	_, simParams, simErr := simulation.SimulateFromSeed(
@@ -74,7 +74,7 @@ func BenchmarkInvariants(b *testing.B) {
 		}
 	}()
 
-	app := NewSimApp(logger, db, nil, true, map[int64]bool{}, DefaultNodeHome, FlagPeriodValue, MakeTestEncodingConfig(), EmptyAppOptions{}, interBlockCacheOpt())
+	app := NewSimApp(logger, db, nil, true, map[int64]bool{}, DefaultNodeHome, FlagPeriodValue, MakeTestEncodingConfig(), EmptyAppOptions{}, interBlockCacheOpt(), baseapp.SetChainID(config.ChainID))
 
 	// run randomized simulation
 	_, simParams, simErr := simulation.SimulateFromSeed(
@@ -102,7 +102,7 @@ func BenchmarkInvariants(b *testing.B) {
 		PrintStats(db)
 	}
 
-	ctx := app.NewContext(true, tmproto.Header{Height: app.LastBlockHeight() + 1})
+	ctx := app.NewContextLegacy(true, tmproto.Header{Height: app.LastBlockHeight() + 1})
 
 	// 3. Benchmark each invariant separately
 	//

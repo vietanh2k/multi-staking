@@ -8,6 +8,7 @@ import (
 	gwruntime "github.com/grpc-ecosystem/grpc-gateway/runtime"
 	"github.com/realio-tech/multi-staking-module/x/multi-staking/client/cli"
 	"github.com/realio-tech/multi-staking-module/x/multi-staking/keeper"
+	"github.com/realio-tech/multi-staking-module/x/multi-staking/simulation"
 	multistakingtypes "github.com/realio-tech/multi-staking-module/x/multi-staking/types"
 	"github.com/spf13/cobra"
 
@@ -16,6 +17,8 @@ import (
 	cdctypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
+	simtypes "github.com/cosmos/cosmos-sdk/types/simulation"
+	sdksimulation "github.com/cosmos/cosmos-sdk/x/simulation"
 	"github.com/cosmos/cosmos-sdk/x/staking"
 	"github.com/cosmos/cosmos-sdk/x/staking/exported"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
@@ -25,8 +28,11 @@ import (
 )
 
 var (
-	_ module.AppModule      = AppModule{}
-	_ module.AppModuleBasic = AppModuleBasic{}
+	_ module.HasABCIGenesis  = AppModule{}
+	_ module.HasServices     = AppModule{}
+	_ module.HasABCIEndBlock = AppModule{}
+	_ module.AppModule       = AppModule{}
+	_ module.AppModuleBasic  = AppModule{}
 )
 
 // AppModule embeds the Cosmos SDK's x/staking AppModuleBasic.
@@ -46,6 +52,7 @@ func (am AppModuleBasic) RegisterLegacyAminoCodec(cdc *codec.LegacyAmino) {
 
 // RegisterInterfaces registers the module interface
 func (am AppModuleBasic) RegisterInterfaces(reg cdctypes.InterfaceRegistry) {
+	stakingtypes.RegisterInterfaces(reg)
 	multistakingtypes.RegisterInterfaces(reg)
 }
 
@@ -72,8 +79,8 @@ func (AppModuleBasic) RegisterGRPCGatewayRoutes(clientCtx client.Context, mux *g
 }
 
 // GetTxCmd returns the staking module's root tx command.
-func (AppModuleBasic) GetTxCmd() *cobra.Command {
-	return cli.NewTxCmd()
+func (amb AppModuleBasic) GetTxCmd() *cobra.Command {
+	return cli.NewTxCmd(amb.cdc.InterfaceRegistry().SigningContext().ValidatorAddressCodec(), amb.cdc.InterfaceRegistry().SigningContext().AddressCodec())
 }
 
 // GetQueryCmd returns the multi-staking and staking module's root query command.
@@ -143,6 +150,9 @@ func (am AppModule) RegisterServices(cfg module.Configurator) {
 	if err := cfg.RegisterMigration(multistakingtypes.ModuleName, 1, m.Migrate1to2); err != nil {
 		panic(fmt.Sprintf("failed to migrate x/%s from version 1 to 2: %v", stakingtypes.ModuleName, err))
 	}
+	if err := cfg.RegisterMigration(multistakingtypes.ModuleName, 2, m.Migrate2to3); err != nil {
+		panic(fmt.Sprintf("failed to migrate x/%s from version 2 to 3: %v", stakingtypes.ModuleName, err))
+	}
 }
 
 // InitGenesis initial genesis state for multi-staking module
@@ -160,22 +170,49 @@ func (am AppModule) ExportGenesis(ctx sdk.Context, cdc codec.JSONCodec) json.Raw
 }
 
 // BeginBlock returns the begin blocker for the multi-staking module.
-func (am AppModule) BeginBlock(ctx sdk.Context, requestBeginBlock abci.RequestBeginBlock) {
-	am.skAppModule.BeginBlock(ctx, requestBeginBlock)
+func (am AppModule) BeginBlock(ctx context.Context) error {
+	return am.skAppModule.BeginBlock(ctx)
 }
 
 // EndBlock returns the end blocker for the multi-staking module. It returns no validator
 // updates.
-func (am AppModule) EndBlock(ctx sdk.Context, requestEndBlock abci.RequestEndBlock) []abci.ValidatorUpdate {
+func (am AppModule) EndBlock(ctx context.Context) ([]abci.ValidatorUpdate, error) {
 	// calculate the amount of coin
-	matureUnbondingDelegations := am.keeper.GetMatureUnbondingDelegations(ctx)
+	matureUnbondingDelegations, err := am.keeper.GetMatureUnbondingDelegations(ctx)
+	if err != nil {
+		return []abci.ValidatorUpdate{}, err
+	}
 	// staking endblock
-	valUpdates := am.skAppModule.EndBlock(ctx, requestEndBlock)
+	valUpdates, err := am.skAppModule.EndBlock(ctx)
+	if err != nil {
+		return []abci.ValidatorUpdate{}, err
+	}
 	// update endblock multi-staking
 	am.keeper.EndBlocker(ctx, matureUnbondingDelegations)
 
-	return valUpdates
+	return valUpdates, nil
 }
 
 // ConsensusVersion return module consensus version
-func (AppModule) ConsensusVersion() uint64 { return 2 }
+func (AppModule) ConsensusVersion() uint64 { return 3 }
+
+// IsAppModule implements the appmodule.AppModule interface.
+func (am AppModule) IsAppModule() {}
+
+// IsOnePerModuleType implements the depinject.OnePerModuleType interface.
+func (am AppModule) IsOnePerModuleType() {}
+
+// GenerateGenesisState creates a randomized GenState of the staking module.
+func (am AppModule) GenerateGenesisState(simState *module.SimulationState) {
+	simulation.RandomizedGenState(simState)
+}
+
+// RegisterStoreDecoder registers a decoder for staking module's types
+func (am AppModule) RegisterStoreDecoder(sdr simtypes.StoreDecoderRegistry) {
+	// sdr[types.StoreKey] = simulation.NewDecodeStore(am.cdc)
+}
+
+// WeightedOperations returns the all the staking module operations with their respective weights.
+func (am AppModule) WeightedOperations(simState module.SimulationState) []simtypes.WeightedOperation {
+	return sdksimulation.WeightedOperations{}
+}
